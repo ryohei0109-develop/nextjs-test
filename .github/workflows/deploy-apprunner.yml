@@ -3,6 +3,7 @@ name: CI-CD to App Runner
 on:
   push:
     branches: ["main"]
+  workflow_dispatch: # ←手動実行用
 
 jobs:
   build-and-deploy:
