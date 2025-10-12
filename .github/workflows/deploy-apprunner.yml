@@ -1,62 +1,26 @@
-name: Build & Push & Start App Runner deployment
+name: Deploy to App Runner (Manual)
 
 on:
-  push:
-    branches: [ "main" ]
-
-env:
-  AWS_REGION: ap-northeast-1
-  AWS_ACCOUNT_ID: "775209358765"
-  ECR_REPOSITORY: "nextjs-test"
-  # ここに App Runner のサービス ARN をセット
-  APPRUNNER_SERVICE_ARN: "arn:aws:apprunner:ap-northeast-1:775209358765:service/nextjs-test/0c09533fdc5d41ddb9d5f5d446fc0e85"
+  workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
 
+env:
+  AWS_REGION: ap-northeast-1
+  APP_RUNNER_SERVICE_ARN: "arn:aws:apprunner:ap-northeast-1:775209358765:service/nextjs-test/0c09533fdc5d41ddb9d5f5d446fc0e85"
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
+          role-to-assume: arn:aws:iam::775209358765:role/github-oidc-deploy-role
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: "arn:aws:iam::775209358765:role/github-oidc-deploy-role"
-          role-session-name: gha-apprunner-deploy
 
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}
-          tags: |
-            type=sha
-            type=raw,value=latest
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          file: ./Dockerfile
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Kick App Runner manual deployment
+      - name: Start App Runner deployment (pull latest prod)
         run: |
-          aws apprunner start-deployment --service-arn "${APPRUNNER_SERVICE_ARN}"
+          aws apprunner start-deployment --service-arn "$APP_RUNNER_SERVICE_ARN"

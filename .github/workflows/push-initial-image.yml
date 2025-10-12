@@ -1,57 +1,44 @@
-name: Push initial image to ECR
+name: Build & Push Image to ECR
 
 on:
   workflow_dispatch:
-
-env:
-  AWS_REGION: ap-northeast-1
-  AWS_ACCOUNT_ID: "775209358765" # ←あなたのアカウントID
-  ECR_REPOSITORY: "nextjs-test"   # ←ECRリポジトリ名
-  IMAGE_TAG: latest
 
 permissions:
   id-token: write
   contents: read
 
+env:
+  AWS_REGION: ap-northeast-1
+  AWS_ACCOUNT_ID: "775209358765"
+  ECR_REPOSITORY: nextjs-test
+  IMAGE_TAG_PROD: prod
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
+          role-to-assume: arn:aws:iam::775209358765:role/github-oidc-deploy-role
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: "arn:aws:iam::775209358765:role/github-oidc-deploy-role"
-          role-session-name: gha-ecr-push
 
       - name: Login to Amazon ECR
-        id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}
-          tags: |
-            type=ref,event=branch
-            type=sha
-            latest
+      - name: Build image
+        run: |
+          docker build -t $ECR_REPOSITORY:build .
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Tag image
+        run: |
+          docker tag $ECR_REPOSITORY:build $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:${{ github.sha }}
+          docker tag $ECR_REPOSITORY:build $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG_PROD
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          file: ./Dockerfile
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Push image
+        run: |
+          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:${{ github.sha }}
+          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG_PROD

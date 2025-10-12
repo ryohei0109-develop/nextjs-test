@@ -1,38 +1,45 @@
-# ベース: Node 22 + Debian slim
-FROM node:22-bookworm-slim AS base
-ENV NODE_ENV=production
+# ---------- Builder ----------
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
-# OpenSSL 3 / CA を用意（Prismaのネイティブライブラリで必要）
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-# 依存関係をインストール（devDeps も含めて入れる：実行時に prisma CLI を使うため）
-# npmを利用（pnpm/yarnを使う場合は適宜変更）
-COPY package.json package-lock.json ./
-RUN npm ci
-
-# Prisma のスキーマ/マイグレーションを先に配置＆クライアント生成
-# 生成物は node_modules/@prisma/client に入る
+# Prisma スキーマを先にコピー（postinstall を殺すが、保険として）
 COPY prisma ./prisma
+COPY package.json package-lock.json ./
+
+# ライフサイクルスクリプトを無効化して依存解決（postinstall回避）
+RUN npm ci --omit=dev --ignore-scripts
+
+# 残りのソースをコピー
+COPY . .
+
+# Prisma Client を明示生成（node_modules に生成物が入る）
 RUN npx prisma generate
 
-# アプリ本体を配置してビルド
-COPY . ./
-# Next.js ビルド（エラー時はログを見やすくするためCI=false）
-ENV CI=false
+# Next.js を standalone でビルド
 RUN npm run build
 
-# App Runner は 8080 を想定
-ENV PORT=8080
-EXPOSE 8080
+# ---------- Runner ----------
+FROM node:22-bookworm-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
 
-# ヘルスチェックは "/" を叩く前提
-# 起動時に migrate deploy を実行 → その後アプリ起動
-# DATABASE_URL は App Runner の環境変数で注入される（このDockerfileでは定義しない）
-CMD sh -c "\
-  echo '==> Prisma migrate deploy を実行' && \
-  npx prisma migrate deploy && \
-  echo '==> Next.js を起動' && \
-  npm run start -- -p ${PORT}"
+# OpenSSL/CA（Prisma エンジン実行時の互換のため）
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends openssl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# standalone 実行物と静的資産を配置
+COPY --from=builder /app/.next/standalone ./ 
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
+# migrate 用に Prisma CLI／Client／Schema／Migrations を同梱
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/prisma ./prisma
+
+EXPOSE 3000
+
+# 起動前に migrate deploy を実行 → Next サーバ起動
+# standalone のエントリは ./server.js
+CMD ["bash", "-lc", "node -v && npx prisma migrate deploy && node server.js"]

@@ -1,16 +1,21 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  reactStrictMode: true,
-  // App Router/Pages どちらでもOK。特別な出力モードは使わずシンプルに起動
-  // （standaloneを使うとPrisma CLIが落ちることがあるため、まずは安定重視）
-  // output: "standalone",
-  // 必要に応じて画像ドメイン等を設定
-  images: {
-    // domains: ["example.com"],
-  },
+  // App Runner の Node ランタイムで動かす前提
+  output: "standalone",
+
+  // 必要ならここに（Next 15 は experimental をトップレベルで）
   experimental: {
-    // 必要なら適宜
+    typedRoutes: true,
+  },
+
+  // もし ESLint エラーでビルドが止まると困る場合のみ有効化
+  // eslint: { ignoreDuringBuilds: true },
+
+  // 画像最適化を App Runner 内でやる場合はこのままでOK
+  // もし外部CDNのみで完結させるなら unoptimized: true の検討も可
+  images: {
+    // remotePatterns: [{ protocol: "https", hostname: "..." }],
   },
 };
 
