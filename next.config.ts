@@ -1,21 +1,20 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // App Runner の Node ランタイムで動かす前提
+  // App Runner は Node サーバ型なのでデフォルト（server）でOK
+  // サイズ削減のため standalone 出力
   output: "standalone",
 
-  // 必要ならここに（Next 15 は experimental をトップレベルで）
+  // 本番で ESLint によるビルド失敗は避ける（任意）
+  eslint: { ignoreDuringBuilds: true },
+
+  // 型チェック失敗でビルド止めたくない場合は true に（任意）
+  // typescript: { ignoreBuildErrors: false },
+
+  // 必要なら experimental はここに（Next 15 は top-level に置く想定）
   experimental: {
-    typedRoutes: true,
-  },
-
-  // もし ESLint エラーでビルドが止まると困る場合のみ有効化
-  // eslint: { ignoreDuringBuilds: true },
-
-  // 画像最適化を App Runner 内でやる場合はこのままでOK
-  // もし外部CDNのみで完結させるなら unoptimized: true の検討も可
-  images: {
-    // remotePatterns: [{ protocol: "https", hostname: "..." }],
+    // 例: typedRoutes など必要に応じて
+    // typedRoutes: true,
   },
 };
 

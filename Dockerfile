@@ -1,45 +1,44 @@
 # ---------- Builder ----------
-FROM node:22-bookworm-slim AS builder
+FROM node:22.20.0-slim AS builder
+ENV NODE_ENV=development
 WORKDIR /app
 
-# Prisma スキーマを先にコピー（postinstall を殺すが、保険として）
+# まず package* と prisma を入れる（postinstall=prisma generate 対策）
+COPY package*.json ./
 COPY prisma ./prisma
-COPY package.json package-lock.json ./
 
-# ライフサイクルスクリプトを無効化して依存解決（postinstall回避）
-RUN npm ci --omit=dev --ignore-scripts
+# dev 依存関係込みで入れる（ビルドに必要）
+RUN npm ci
 
-# 残りのソースをコピー
+# 残りのソースを投入
 COPY . .
 
-# Prisma Client を明示生成（node_modules に生成物が入る）
-RUN npx prisma generate
-
-# Next.js を standalone でビルド
+# Next.js は standalone 出力。package.json の "build" は
+# "prisma generate && next build" を想定（ユーザ提供の定義）。:contentReference[oaicite:1]{index=1}
 RUN npm run build
 
 # ---------- Runner ----------
-FROM node:22-bookworm-slim AS runner
-WORKDIR /app
+FROM node:22.20.0-slim AS runner
 ENV NODE_ENV=production
+WORKDIR /app
+
+# App Runner は 3000 を使う条件なので固定
 ENV PORT=3000
 
-# OpenSSL/CA（Prisma エンジン実行時の互換のため）
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends openssl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-# standalone 実行物と静的資産を配置
-COPY --from=builder /app/.next/standalone ./ 
-COPY --from=builder /app/.next/static ./.next/static
+# Next の standalone 方式に従って必要物だけコピー
+# - .next/standalone 内に Node 実行に必要な node_modules がまとまる
+# - .next/static と public は別コピー
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./public/.next/static
 COPY --from=builder /app/public ./public
-
-# migrate 用に Prisma CLI／Client／Schema／Migrations を同梱
-COPY --from=builder /app/node_modules ./node_modules
+# マイグレーション実行用に migrations も持ってくる
 COPY --from=builder /app/prisma ./prisma
+
+# 健康のため（が、基本 slim には CA 入ってます）
+# RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 3000
 
-# 起動前に migrate deploy を実行 → Next サーバ起動
-# standalone のエントリは ./server.js
-CMD ["bash", "-lc", "node -v && npx prisma migrate deploy && node server.js"]
+# 起動時に migrate deploy -> Next を起動
+# App Runner の環境変数に DATABASE_URL を設定しておくこと。
+CMD bash -lc "npx prisma migrate deploy && node server.js"

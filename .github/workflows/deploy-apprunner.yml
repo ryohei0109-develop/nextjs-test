@@ -1,26 +1,51 @@
-name: Deploy to App Runner (Manual)
+name: Deploy to AppRunner
 
 on:
+  push:
+    branches: [ "main" ]
   workflow_dispatch:
-
-permissions:
-  id-token: write
-  contents: read
 
 env:
   AWS_REGION: ap-northeast-1
-  APP_RUNNER_SERVICE_ARN: "arn:aws:apprunner:ap-northeast-1:775209358765:service/nextjs-test/0c09533fdc5d41ddb9d5f5d446fc0e85"
+  ECR_REPOSITORY: nextjs-test               # ← リポジトリ名（必要に応じて変更）
+  IMAGE_TAG: ${{ github.sha }}
+
+permissions:
+  id-token: write   # OIDC
+  contents: read
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Configure AWS
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::775209358765:role/github-oidc-deploy-role
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-oidc-deploy-role
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Start App Runner deployment (pull latest prod)
+      - name: Login to Amazon ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+      - name: Build image
         run: |
-          aws apprunner start-deployment --service-arn "$APP_RUNNER_SERVICE_ARN"
+          docker build \
+            -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
+            -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest \
+            .
+
+      - name: Push image
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+
+      # App Runner が「手動デプロイ」でも CLI で明示開始可
+      - name: Trigger App Runner deployment (manual mode)
+        run: |
+          aws apprunner start-deployment --service-arn "${{ secrets.APP_RUNNER_SERVICE_ARN }}"
