@@ -3,27 +3,26 @@ name: CI-CD to App Runner
 on:
   push:
     branches: ["main"]
-  workflow_dispatch: # ←手動実行用
+  workflow_dispatch: {}   # ←手動実行できるように
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     permissions:
-      id-token: write   # OIDC用（超重要）
+      id-token: write
       contents: read
 
     env:
       AWS_REGION: ap-northeast-1
-      ECR_REPOSITORY: nextjs-test      # ←ECRに作るリポジトリ名
+      ECR_REPOSITORY: nextjs-test
       IMAGE_TAG: ${{ github.sha }}
-      APP_RUNNER_SERVICE_ARN: "arn:aws:apprunner:ap-northeast-1:775209358765:service/nextjs-test/0c09533fdc5d41ddb9d5f5d446fc0e85"
+      APP_RUNNER_SERVICE_ARN: arn:aws:apprunner:ap-northeast-1:YOUR_AWS_ACCOUNT_ID:service/nextjs-test/xxxxxxxxxxxxxxxx
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # まずは素のNodeで早期チェック
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -35,14 +34,23 @@ jobs:
       - run: npm run test --if-present
       - run: npm run build
 
-      # --- ここで本番DBへマイグレーションを適用 ---
+      # --- Secret の存在チェック（空だと落とす） ---
+      - name: Assert DATABASE_URL exists
+        run: |
+          if [ "${{ secrets.DATABASE_URL }}" = "" ]; then
+            echo "::error::Missing GitHub Secret: DATABASE_URL"
+            exit 1
+          fi
+          echo "OK: DATABASE_URL is set."
+      # -----------------------------------
+
+      # 本番DBにマイグレーション（Neon/RDSどちらでもOK）
       - name: Run Prisma migrate (prod DB)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npx prisma migrate deploy
-      # ---------------------------------------------
 
-      # AWS 認証（OIDCで鍵レス）
+      # AWS 認証（OIDC）
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -56,29 +64,27 @@ jobs:
 
       # Docker build & push
       - name: Build image
-        run: |
-          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+        run: docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+
       - name: Tag & Push
         run: |
           docker tag $ECR_REPOSITORY:$IMAGE_TAG ${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:$IMAGE_TAG
           docker push ${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:$IMAGE_TAG
 
-      # App Runner 更新（ローリングデプロイ）
+      # App Runner 更新（環境変数は dict 形式で渡す！）
       - name: Update App Runner service
         run: |
           aws apprunner update-service \
             --service-arn "$APP_RUNNER_SERVICE_ARN" \
-            --source-configuration '{
-              "ImageRepository": {
-                "ImageIdentifier": "'"${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}"'",
-                "ImageRepositoryType": "ECR",
-                "ImageConfiguration": {
-                  "Port": "3000",
-                  "RuntimeEnvironmentVariables": [
-                    {"Name":"DATABASE_URL","Value":"'"${{ secrets.DATABASE_URL }}"'"},
-                    {"Name":"NEXTAUTH_URL","Value":"'"${{ secrets.NEXTAUTH_URL }}"'"},
-                    {"Name":"NEXTAUTH_SECRET","Value":"'"${{ secrets.NEXTAUTH_SECRET }}"'"}
-                  ]
+            --source-configuration "{
+              \"ImageRepository\": {
+                \"ImageIdentifier\": \"${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}\",
+                \"ImageRepositoryType\": \"ECR\",
+                \"ImageConfiguration\": {
+                  \"Port\": \"3000\",
+                  \"RuntimeEnvironmentVariables\": {
+                    \"DATABASE_URL\": \"${{ secrets.DATABASE_URL }}\"
+                  }
                 }
               }
-            }'
+            }"
