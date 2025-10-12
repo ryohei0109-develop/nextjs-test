@@ -16,7 +16,7 @@ jobs:
       AWS_REGION: ap-northeast-1
       ECR_REPOSITORY: nextjs-test      # ←ECRに作るリポジトリ名
       IMAGE_TAG: ${{ github.sha }}
-      APP_RUNNER_SERVICE_ARN: arn:aws:apprunner:ap-northeast-1:YOUR_AWS_ACCOUNT_ID:service/nextjs-test/xxxxxxxxxxxxxxxx
+      APP_RUNNER_SERVICE_ARN: "arn:aws:apprunner:ap-northeast-1:775209358765:service/nextjs-test/0c09533fdc5d41ddb9d5f5d446fc0e85"
 
     steps:
       - name: Checkout
@@ -37,7 +37,7 @@ jobs:
       # --- ここで本番DBへマイグレーションを適用 ---
       - name: Run Prisma migrate (prod DB)
         env:
-          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npx prisma migrate deploy
       # ---------------------------------------------
 
