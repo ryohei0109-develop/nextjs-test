@@ -75,7 +75,7 @@ jobs:
                 "ImageConfiguration": {
                   "Port": "3000",
                   "RuntimeEnvironmentVariables": [
-                    {"Name":"DATABASE_URL","Value":"'"${{ secrets.PROD_DATABASE_URL }}"'"},
+                    {"Name":"DATABASE_URL","Value":"'"${{ secrets.DATABASE_URL }}"'"},
                     {"Name":"NEXTAUTH_URL","Value":"'"${{ secrets.NEXTAUTH_URL }}"'"},
                     {"Name":"NEXTAUTH_SECRET","Value":"'"${{ secrets.NEXTAUTH_SECRET }}"'"}
                   ]
