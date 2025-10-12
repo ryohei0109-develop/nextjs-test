@@ -1,21 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // App Runner は Node サーバ型なのでデフォルト（server）でOK
-  // サイズ削減のため standalone 出力
-  output: "standalone",
-
-  // 本番で ESLint によるビルド失敗は避ける（任意）
-  eslint: { ignoreDuringBuilds: true },
-
-  // 型チェック失敗でビルド止めたくない場合は true に（任意）
-  // typescript: { ignoreBuildErrors: false },
-
-  // 必要なら experimental はここに（Next 15 は top-level に置く想定）
-  experimental: {
-    // 例: typedRoutes など必要に応じて
-    // typedRoutes: true,
-  },
+  // 必要なら後で項目を足します。
+  // 例: images: { remotePatterns: [...] }, redirects/rewrite など
+  eslint: { ignoreDuringBuilds: true }, // CIで ESLint で止まるのを回避（必要に応じて外せます）
+  typescript: { ignoreBuildErrors: false },
+  // output: "standalone" も設定可能ですが、まずは標準構成で動作確認します。
 };
 
 export default nextConfig;

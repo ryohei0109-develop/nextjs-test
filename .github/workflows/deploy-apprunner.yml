@@ -1,51 +1,48 @@
-name: Deploy to AppRunner
+name: Build, push, and deploy to App Runner (manual deploy mode)
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 env:
   AWS_REGION: ap-northeast-1
-  ECR_REPOSITORY: nextjs-test               # ← リポジトリ名（必要に応じて変更）
+  AWS_ACCOUNT_ID: "775209358765"
+  ECR_REPOSITORY: "nextjs-test"
+  APP_RUNNER_SERVICE_ARN: "arn:aws:apprunner:ap-northeast-1:775209358765:service/nextjs-test/0c09533fdc5d41ddb9d5f5d446fc0e85"
   IMAGE_TAG: ${{ github.sha }}
 
-permissions:
-  id-token: write   # OIDC
-  contents: read
-
 jobs:
-  build-and-deploy:
+  build-push-deploy:
     runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials (OIDC)
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-oidc-deploy-role
+          role-to-assume: "arn:aws:iam::775209358765:role/github-oidc-deploy-role"
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        uses: docker/login-action@v3
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
         with:
-          registry: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          context: .
+          push: true
+          tags: |
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
 
-      - name: Build image
+      - name: Kick App Runner deployment
         run: |
-          docker build \
-            -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
-            -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest \
-            .
-
-      - name: Push image
-        run: |
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
-
-      # App Runner が「手動デプロイ」でも CLI で明示開始可
-      - name: Trigger App Runner deployment (manual mode)
-        run: |
-          aws apprunner start-deployment --service-arn "${{ secrets.APP_RUNNER_SERVICE_ARN }}"
+          aws apprunner start-deployment --service-arn "${APP_RUNNER_SERVICE_ARN}"

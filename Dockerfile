@@ -1,44 +1,51 @@
-# ---------- Builder ----------
-FROM node:22.20.0-slim AS builder
-ENV NODE_ENV=development
-WORKDIR /app
-
-# まず package* と prisma を入れる（postinstall=prisma generate 対策）
-COPY package*.json ./
-COPY prisma ./prisma
-
-# dev 依存関係込みで入れる（ビルドに必要）
-RUN npm ci
-
-# 残りのソースを投入
-COPY . .
-
-# Next.js は standalone 出力。package.json の "build" は
-# "prisma generate && next build" を想定（ユーザ提供の定義）。:contentReference[oaicite:1]{index=1}
-RUN npm run build
-
-# ---------- Runner ----------
-FROM node:22.20.0-slim AS runner
+# ---- Base ----
+FROM node:22.20.0-slim AS base
 ENV NODE_ENV=production
 WORKDIR /app
 
-# App Runner は 3000 を使う条件なので固定
+# システム更新（必要最低限）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---- Deps layer ----
+FROM base AS deps
+# 依存関係解決のため package* と prisma スキーマを先にコピー
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+
+# ここで postinstall を無効化して "npm ci"
+#  => prisma がコピーされる前に generate が走って失敗…を防止
+RUN npm ci --ignore-scripts
+
+# ---- Build ----
+FROM base AS build
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/package.json ./package.json
+COPY --from=deps /app/package-lock.json ./package-lock.json
+
+# アプリ本体と Prisma, Next 構成をコピー
+COPY . .
+
+# Prisma クライアント生成 → Next ビルド
+# package.json の build に prisma generate が入っているが、
+# ここで明示的に実行しておく（冪等なので二重でも問題なし）
+RUN npx prisma generate && npm run build
+
+# ---- Runtime ----
+FROM base AS runner
 ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+WORKDIR /app
 
-# Next の standalone 方式に従って必要物だけコピー
-# - .next/standalone 内に Node 実行に必要な node_modules がまとまる
-# - .next/static と public は別コピー
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./public/.next/static
-COPY --from=builder /app/public ./public
-# マイグレーション実行用に migrations も持ってくる
-COPY --from=builder /app/prisma ./prisma
-
-# 健康のため（が、基本 slim には CA 入ってます）
-# RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+# 必要物だけコピー
+COPY --from=build /app/package.json ./
+COPY --from=deps  /app/node_modules ./node_modules
+COPY --from=build /app/.next ./.next
+COPY --from=build /app/public ./public
+COPY --from=build /app/prisma ./prisma
 
 EXPOSE 3000
 
-# 起動時に migrate deploy -> Next を起動
-# App Runner の環境変数に DATABASE_URL を設定しておくこと。
-CMD bash -lc "npx prisma migrate deploy && node server.js"
+# 起動時に migrate deploy を噛ませてから start
+CMD ["sh", "-c", "npm run migrate:deploy && npm run start"]
