@@ -9,10 +9,6 @@ const nextConfig: NextConfig = {
         hostname: 'images.dog.ceo'
       }
     ]
-  },
-  eslint: {
-    // ビルド時の ESLint エラーで失敗させない（暫定）
-    ignoreDuringBuilds: true,
   }
 };
 

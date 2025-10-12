@@ -1,0 +1,43 @@
+name: Push initial image to ECR
+on:
+  workflow_dispatch: {}   # Actions画面から手動実行
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ap-northeast-1
+      ECR_REPOSITORY: nextjs-test
+      IMAGE_TAG: bootstrap
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ararn:aws:iam::775209358765:role/github-oidc-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        run: docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+
+      - name: Tag & Push
+        run: |
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG ${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:$IMAGE_TAG
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG ${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:latest
+          docker push ${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:$IMAGE_TAG
+          docker push ${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:latest
