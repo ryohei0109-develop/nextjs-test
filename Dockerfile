@@ -29,4 +29,4 @@ COPY --from=build /app/public ./public
 # （明示コピーは不要になるが、残しても害なし）
 # COPY --from=build /app/node_modules/@prisma /app/node_modules/@prisma
 
-CMD ["node", ".next/standalone/server.js"]
+CMD ["node", "server.js"]
