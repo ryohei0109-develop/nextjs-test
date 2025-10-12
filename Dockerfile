@@ -18,15 +18,19 @@ ENV PORT=3000
 ENV HOST=0.0.0.0
 EXPOSE 3000
 
-# 念のため OpenSSL
+# OpenSSL（念のため）
 RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
-# Next の standalone 出力（node_modules を含む最小セット）
+# Next の standalone 出力
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 
-# （明示コピーは不要になるが、残しても害なし）
-# COPY --from=build /app/node_modules/@prisma /app/node_modules/@prisma
+# Prisma のランタイム資材を同梱
+COPY --from=build /app/node_modules/@prisma /app/node_modules/@prisma
 
+# ★ Prisma Query Engine の場所を明示：bookworm(OpenSSL 3系)
+ENV PRISMA_QUERY_ENGINE_LIBRARY=/app/node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node
+
+# 起動
 CMD ["node", "server.js"]
