@@ -32,4 +32,4 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/prisma ./prisma
 
 # 起動前に migrate を適用（初回＆デプロイ時）
-CMD ["sh", "-c", "npx prisma migrate deploy && node server.js"]
+CMD ["node", "server.js"]

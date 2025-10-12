@@ -22,16 +22,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # まずは素のNodeでビルドが通るか早期チェック（失敗ならここで止める）
+      # まずは素のNodeで早期チェック
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
+
       - run: npm ci
       - run: npm run lint --if-present
       - run: npm run test --if-present
       - run: npm run build
+
+      # --- ここで本番DBへマイグレーションを適用 ---
+      - name: Run Prisma migrate (prod DB)
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: npx prisma migrate deploy
+      # ---------------------------------------------
 
       # AWS 認証（OIDCで鍵レス）
       - name: Configure AWS credentials
