@@ -6,6 +6,8 @@
 
 generator client {
   provider = "prisma-client-js"
+  engineType    = "library" // Next.js向け
+  binaryTargets = ["debian-openssl-3.0.x","native"] // bookwormはOpenSSL 3系
   output   = "../src/generated/prisma"
 }
 

@@ -25,11 +25,17 @@ ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
-# standalone で最小コピー
+# OpenSSL 3 を入れる（警告回避 & 互換）
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
+# standalone最小セット＋Prismaのランタイム資材を明示コピー
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
-COPY --from=build /app/prisma ./prisma
+
+# 🔑 ここがポイント：Prismaのエンジンとクライアントを同梱
+COPY --from=build /app/node_modules/.prisma /app/node_modules/.prisma
+COPY --from=build /app/node_modules/@prisma /app/node_modules/@prisma
 
 # 起動前に migrate を適用（初回＆デプロイ時）
 CMD ["node", "server.js"]
