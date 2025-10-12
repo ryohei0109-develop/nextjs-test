@@ -1,33 +1,35 @@
 # --- Build stage ---
-FROM node:20-bookworm-slim AS build
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
-# 依存インストール（キャッシュ効く順）
+# 依存解決用に package* と prisma を先にコピー
 COPY package*.json ./
-RUN npm ci
+COPY prisma ./prisma
+
+# postinstall を抑止して先に依存だけ入れる（prisma generate は後で手動）
+RUN npm ci --ignore-scripts
 
 # ソース投入
 COPY . .
 
-# Prismaのクライアント生成（DB接続は不要）
-RUN npx prisma generate || true
+# Prisma クライアント生成（この時点では schema が存在する）
+RUN npx prisma generate
 
-# Next.jsを本番ビルド（standalone）
+# Next.js を本番ビルド（standalone）
 RUN npm run build
 
 # --- Runtime stage ---
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
-# standalone方式で必要物だけコピー
+# standalone で最小コピー
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 COPY --from=build /app/prisma ./prisma
 
-# 起動前に本番DBへマイグレーションを適用（初回＆デプロイ時）
-# ※ DATABASE_URL は App Runner の環境変数で渡します
+# 起動前に migrate を適用（初回＆デプロイ時）
 CMD ["sh", "-c", "npx prisma migrate deploy && node server.js"]
