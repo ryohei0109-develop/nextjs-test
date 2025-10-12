@@ -1,90 +1,62 @@
-name: CI-CD to App Runner
+name: Build & Push & Start App Runner deployment
 
 on:
   push:
-    branches: ["main"]
-  workflow_dispatch: {}   # ←手動実行できるように
+    branches: [ "main" ]
+
+env:
+  AWS_REGION: ap-northeast-1
+  AWS_ACCOUNT_ID: "775209358765"
+  ECR_REPOSITORY: "nextjs-test"
+  # ここに App Runner のサービス ARN をセット
+  APPRUNNER_SERVICE_ARN: "arn:aws:apprunner:ap-northeast-1:775209358765:service/nextjs-test/0c09533fdc5d41ddb9d5f5d446fc0e85"
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-
-    permissions:
-      id-token: write
-      contents: read
-
-    env:
-      AWS_REGION: ap-northeast-1
-      ECR_REPOSITORY: nextjs-test
-      IMAGE_TAG: ${{ github.sha }}
-      APP_RUNNER_SERVICE_ARN: "arn:aws:apprunner:ap-northeast-1:775209358765:service/nextjs-test/0c09533fdc5d41ddb9d5f5d446fc0e85"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - run: npm ci
-      - run: npm run lint --if-present
-      - run: npm run test --if-present
-      - run: npm run build
-
-      # --- Secret の存在チェック（空だと落とす） ---
-      - name: Assert DATABASE_URL exists
-        run: |
-          if [ "${{ secrets.DATABASE_URL }}" = "" ]; then
-            echo "::error::Missing GitHub Secret: DATABASE_URL"
-            exit 1
-          fi
-          echo "OK: DATABASE_URL is set."
-      # -----------------------------------
-
-      # 本番DBにマイグレーション（Neon/RDSどちらでもOK）
-      - name: Run Prisma migrate (prod DB)
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npx prisma migrate deploy
-
-      # AWS 認証（OIDC）
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: "arn:aws:iam::775209358765:role/github-oidc-deploy-role"
           aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: "arn:aws:iam::775209358765:role/github-oidc-deploy-role"
+          role-session-name: gha-apprunner-deploy
 
-      # ECR login
-      - name: Login to ECR
-        id: ecr
+      - name: Login to Amazon ECR
+        id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Docker build & push
-      - name: Build image
-        run: docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=sha
+            type=raw,value=latest
 
-      - name: Tag & Push
-        run: |
-          docker tag $ECR_REPOSITORY:$IMAGE_TAG ${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:$IMAGE_TAG
-          docker push ${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:$IMAGE_TAG
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      # App Runner 更新（環境変数は dict 形式で渡す！）
-      - name: Update App Runner service
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          file: ./Dockerfile
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Kick App Runner manual deployment
         run: |
-          aws apprunner update-service \
-            --service-arn "$APP_RUNNER_SERVICE_ARN" \
-            --source-configuration "{
-              \"ImageRepository\": {
-                \"ImageIdentifier\": \"${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}\",
-                \"ImageRepositoryType\": \"ECR\",
-                \"ImageConfiguration\": {
-                  \"Port\": \"3000\",
-                  \"RuntimeEnvironmentVariables\": {
-                    \"DATABASE_URL\": \"${{ secrets.DATABASE_URL }}\"
-                  }
-                }
-              }
-            }"
+          aws apprunner start-deployment --service-arn "${APPRUNNER_SERVICE_ARN}"

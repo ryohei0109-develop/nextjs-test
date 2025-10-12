@@ -1,40 +1,38 @@
-# ===========================
-#  Build Stage
-# ===========================
-FROM node:20-bookworm AS build
+# ベース: Node 22 + Debian slim
+FROM node:22-bookworm-slim AS base
+ENV NODE_ENV=production
 WORKDIR /app
 
-# 依存関係のインストール
-COPY package*.json ./
+# OpenSSL 3 / CA を用意（Prismaのネイティブライブラリで必要）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# 依存関係をインストール（devDeps も含めて入れる：実行時に prisma CLI を使うため）
+# npmを利用（pnpm/yarnを使う場合は適宜変更）
+COPY package.json package-lock.json ./
 RUN npm ci
 
-# Prisma クライアントの生成（ここが最重要）
+# Prisma のスキーマ/マイグレーションを先に配置＆クライアント生成
+# 生成物は node_modules/@prisma/client に入る
 COPY prisma ./prisma
 RUN npx prisma generate
 
-# Next.js ビルド
-COPY . .
+# アプリ本体を配置してビルド
+COPY . ./
+# Next.js ビルド（エラー時はログを見やすくするためCI=false）
+ENV CI=false
 RUN npm run build
 
-# ===========================
-#  Runtime Stage
-# ===========================
-FROM node:20-bookworm-slim AS runtime
-WORKDIR /app
+# App Runner は 8080 を想定
+ENV PORT=8080
+EXPOSE 8080
 
-# 必要なランタイムファイルだけコピー
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/prisma ./prisma
-COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/.next/static ./public
-
-# Prisma エンジンの明示コピー
-COPY --from=build /app/node_modules/@prisma /app/node_modules/@prisma
-
-# OpenSSL 警告を防止（App Runner は OpenSSL 3）
-ENV PRISMA_QUERY_ENGINE_LIBRARY=/app/node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node
-ENV NODE_ENV=production
-ENV PORT=3000
-
-EXPOSE 3000
-CMD ["node", "server.js"]
+# ヘルスチェックは "/" を叩く前提
+# 起動時に migrate deploy を実行 → その後アプリ起動
+# DATABASE_URL は App Runner の環境変数で注入される（このDockerfileでは定義しない）
+CMD sh -c "\
+  echo '==> Prisma migrate deploy を実行' && \
+  npx prisma migrate deploy && \
+  echo '==> Next.js を起動' && \
+  npm run start -- -p ${PORT}"
